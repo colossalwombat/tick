@@ -3,14 +3,13 @@ import (
 	"github.com/levigross/grequests"
 	"fmt"
 	//"strings"
-	"time"
 	"io/ioutil"
-	//"io"
-	"golang.org/x/crypto/ssh/terminal"
-	//"math/rand"
+	"github.com/gizak/termui"
 	"os"
 	"encoding/json"
 	"strconv"
+	//"time"
+	"sort"
 )
 
 type UnitFigures struct{
@@ -46,42 +45,125 @@ func getHigh(values []float64) (float64){
 	return high
 }
 
-func displayGraph(values []float64, wipe bool) {
-	width, height, err := terminal.GetSize(int(os.Stdin.Fd()))
-	check(err)
+func intCast(array []float64) ([]int) {
 
-	if wipe {
-		fmt.Printf("\033[%dA", height -1)
+	intArray := make([]int, 0)
+	for i := range array{
+		intArray = append(intArray, int(array[i]))
 	}
 
-	high := getHigh(values)
+	//does this operate in place?
+	return intArray
+}
 
-	i := height - 1
+func displayGraph(values []float64, labels []string, symbol, mode string) {
 
-	for i > 0 {
-		//make sure not to overrun the line
-		if height - i > width {
-			fmt.Println("\n\n\n\n\n\n\ndoes this appear?")
-			time.Sleep(2 * time.Second)
-			break
-		}
+	linechart := termui.NewLineChart()
+	linechart.BorderLabel = fmt.Sprintf("%s Daily %s", symbol, mode)
 
-		fmt.Printf("\r")
-		//loop through the values, print an X if the value is within the range
+	//if mode == "Volume" || mode == "volume" {
+	//	linechart.Data = intCast(values[len(labels) - termui.TermWidth():])
+	//} else {
+	linechart.Data = values[len(labels) - termui.TermWidth():]
+	//}	
 
-		for _, value := range values{
-			if float64(value) >= (float64(i)/float64(height)) * float64(high) {
-				fmt.Printf("X")
-			} else {
-				fmt.Printf(" ")
-			}
-		}
-		fmt.Printf("\n")
-		i--
-	}
+	linechart.Mode = "dot"
+	linechart.Width = termui.TermWidth()
+	linechart.Height = termui.TermHeight()
+	linechart.DataLabels = labels[len(labels) - termui.TermWidth():]
+	linechart.X = 0
+	linechart.Y = 0
+	linechart.AxesColor = termui.ColorGreen
+	linechart.LineColor = termui.ColorCyan | termui.AttrBold
 
+
+	termui.Render(linechart)
+	termui.Handle("/sys/kbd/q", func(termui.Event){
+		termui.StopLoop()
+		})
+	//termui.Handle("
+	termui.Loop()
 
 }
+
+func apiLookup(symbol string) (string){
+
+	key, err := ioutil.ReadFile("key")
+	check(err)
+
+	//if you really want to steal my API key, go for it
+	API_KEY := string(key)
+
+	resp, err := grequests.Get(fmt.Sprintf("https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&outputsize=full&symbol=%s&apikey=%s", symbol, API_KEY), nil)
+
+	check(err)
+
+	return resp.String()
+
+}
+
+func processJson (json_request, mode string)([]float64, []string) {
+	var result map[string]interface{}
+
+	json.Unmarshal([]byte(json_request), &result)
+
+	figures := []UnitFigures{}
+	labels := []string{}
+
+	keys := make([]string, 0)
+
+	//sort the keys so we can iterate over the map in order
+	for k, _ := range result[fmt.Sprintf("Time Series (%s)", "Daily")].(map[string]interface{}) {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	for _, k := range keys {
+
+		figures = append(figures, getFigures(result[fmt.Sprintf("Time Series (%s)", "Daily")].(map[string]interface{})[k].(map[string]interface{})))
+		labels = append(labels, k)
+	}
+
+	figures_narrow := []float64{}
+
+	//grab the values indicated by the mode string
+
+	switch mode {
+		case "High", "high":
+			for _, figure := range figures{
+				figures_narrow = append(figures_narrow, float64(figure.High))
+				}
+
+		case "Low", "low":
+			for _, figure := range figures{
+				figures_narrow = append(figures_narrow, float64(figure.Low))
+			}
+
+		case "Open", "open":
+			for _, figure := range figures{
+				figures_narrow = append(figures_narrow, float64(figure.Open))
+			}
+		
+		case "Close", "close":
+			for _, figure := range figures{
+				figures_narrow = append(figures_narrow, float64(figure.Close))
+			}
+		
+		case "Volume", "volume":
+			for _, figure := range figures{
+				figures_narrow = append(figures_narrow, float64(figure.Volume))
+			}
+		
+	}
+
+	return figures_narrow, labels
+}
+
+func initTermui(){
+	err := termui.Init()
+	check(err)	
+}
+
 
 
 func check(e error){
@@ -92,47 +174,22 @@ func check(e error){
 
 
 func main () {
-	key, err := ioutil.ReadFile("key")
-	check(err)
 
-	API_KEY := string(key)
+	//set the symbol from the command line (temporary)
+	SYMBOL, MODE := os.Args[1] ,os.Args[2]
 
-	resp, err := grequests.Get(fmt.Sprintf("https://www.alphavantage.co/query?function=TIME_SERIES_INTRADAY&symbol=MSFT&interval=60min&apikey=%s", API_KEY), nil)
+	json_request := apiLookup(SYMBOL)
 
-	check(err)
-
-	json_request := resp.String()
-
-	//OFFLINE VERSION
-	//json_request, err := ioutil.ReadFile("/Users/Jack/Desktop/json_request")
+	//Initialize the UI
+	initTermui()
 
 
-	check(err)
-
-	var result map[string]interface{}
-
-	json.Unmarshal([]byte(json_request), &result)
-
-	figures := []UnitFigures{}
-
-	for _, v := range result["Time Series (60min)"].(map[string]interface{}){
-		figures = append(figures, getFigures(v.(map[string]interface{})))
-	}
-
-
-
-	figures_high := []float64{}
-
-	for _, figure := range figures{
-		figures_high = append(figures_high, float64(figure.Volume))
-	}
+	figures_processed, labels := processJson(json_request, MODE)
 	
 
-	for{
-		displayGraph(figures_high, true)
-		time.Sleep(1 * time.Second)
-	}
+	displayGraph(figures_processed, labels, SYMBOL, MODE)
 
+	termui.Close()
 
 }
 
