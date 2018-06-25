@@ -56,21 +56,21 @@ func intCast(array []float64) ([]int) {
 	return intArray
 }
 
-func displayGraph(values []float64, labels []string, symbol, mode string) {
+func displayGraph(values []float64, labels []string, symbol, mode string, xshift int) {
 
 	linechart := termui.NewLineChart()
 	linechart.BorderLabel = fmt.Sprintf("%s Daily %s", symbol, mode)
 
-	//if mode == "Volume" || mode == "volume" {
-	//	linechart.Data = intCast(values[len(labels) - termui.TermWidth():])
-	//} else {
-	linechart.Data = values[len(labels) - termui.TermWidth():]
-	//}	
+    //limit the data set to what shold be on screen, specified by the xshift
+    //xshift is added, but is a negative value so the net result is to subtract it
+    //this is because having a positive value indicate a leftward shift hurts my brain
+
+	linechart.Data = values[len(values) - termui.TermWidth() + xshift:len(values) + xshift]
+    linechart.DataLabels = labels[len(labels) - termui.TermWidth() + xshift:len(labels) + xshift]
 
 	linechart.Mode = "dot"
 	linechart.Width = termui.TermWidth()
 	linechart.Height = termui.TermHeight()
-	linechart.DataLabels = labels[len(labels) - termui.TermWidth():]
 	linechart.X = 0
 	linechart.Y = 0
 	linechart.AxesColor = termui.ColorGreen
@@ -78,12 +78,6 @@ func displayGraph(values []float64, labels []string, symbol, mode string) {
 
 
 	termui.Render(linechart)
-	termui.Handle("/sys/kbd/q", func(termui.Event){
-		termui.StopLoop()
-		})
-	//termui.Handle("
-	termui.Loop()
-
 }
 
 func apiLookup(symbol string) (string){
@@ -185,9 +179,31 @@ func main () {
 
 
 	figures_processed, labels := processJson(json_request, MODE)
+    xshift := 0
 	
 
-	displayGraph(figures_processed, labels, SYMBOL, MODE)
+	displayGraph(figures_processed, labels, SYMBOL, MODE, xshift)
+
+
+    //key triggers, q to quit
+    
+    termui.Handle("/sys/kbd/q", func(termui.Event){
+        termui.StopLoop()
+        })
+    termui.Handle("/sys/kbd/<left>", func(termui.Event){
+        if -(xshift) < len(labels){
+            xshift -= 5
+            displayGraph(figures_processed, labels, SYMBOL, MODE, xshift)
+        }
+    })
+
+    termui.Handle("/sys/kbd/<right>", func(termui.Event){
+        if xshift < 0 {
+            xshift += 5 
+            displayGraph(figures_processed, labels, SYMBOL, MODE, xshift)
+        }
+    })
+    termui.Loop()
 
 	termui.Close()
 
