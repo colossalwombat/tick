@@ -2,155 +2,58 @@ package main
 import (
 	"github.com/levigross/grequests"
 	"fmt"
-	//"strings"
-	"io/ioutil"
+	"strings"
 	"github.com/gizak/termui"
-	"os"
 	"encoding/json"
 	"strconv"
-	//"time"
-	"sort"
+
 )
 
-type UnitFigures struct{
-	//data structure for each unit of time returned by the lovely alphavantage api's inccorigible json
-	Open, High, Low, Close float64
-	Volume int64
+//define the 30 companies from the DJIA
+var DOW_SYMB = []string{"MMM", "AXP", "AAPL", "BA", "CAT", "CVX", "CSCO", "KO", "DIS", "DWDP", "XOM", "GE", "GS", "HD", "IBM", "INTC", "JNJ", "JPM", "MCD", "MRK", "MSFT", "NKE", "PFE", "PG", "TRV", "UTX", "UNH", "VZ", "V", "WMT"}
+
+type PVpair struct {
+	symbol string
+	price float64
+	volume int64
 }
 
-func getFigures(result map[string]interface{})(UnitFigures){
-	figures := UnitFigures{}
 
-	var err error
-	
-	figures.Open, err = strconv.ParseFloat(result["1. open"].(string), 64) 
-	figures.High, err = strconv.ParseFloat(result["2. high"].(string), 64)
-	figures.Low, err = strconv.ParseFloat(result["3. low"].(string), 64)
-	figures.Close, err =  strconv.ParseFloat(result["4. close"].(string), 64) 
-	figures.Volume, err = strconv.ParseInt(result["5. volume"].(string), 0, 0)
 
+
+func apiLookupRealtime(key string) (string){
+
+
+	symbols_formatted := strings.Join(DOW_SYMB, ",")
+
+	resp, err := grequests.Get(fmt.Sprintf("https://www.alphavantage.co/query?function=BATCH_STOCK_QUOTES&symbols=%s&apikey=%s", symbols_formatted, key), nil)
 	check(err)
-
-	return figures
-}
-
-func getHigh(values []float64) (float64){
-	high := 0.0
-
-	for _, v := range values {
-		if v > high{
-			high = v
-		}
-	}
-	return high
-}
-
-func intCast(array []float64) ([]int) {
-
-	intArray := make([]int, 0)
-	for i := range array{
-		intArray = append(intArray, int(array[i]))
-	}
-
-	//does this operate in place?
-	return intArray
-}
-
-func displayGraph(values []float64, labels []string, symbol, mode string, xshift int) {
-
-	linechart := termui.NewLineChart()
-	linechart.BorderLabel = fmt.Sprintf("%s Daily %s", symbol, mode)
-
-    //limit the data set to what shold be on screen, specified by the xshift
-    //xshift is added, but is a negative value so the net result is to subtract it
-    //this is because having a positive value indicate a leftward shift hurts my brain
-
-	linechart.Data = values[len(values) - termui.TermWidth() + xshift:len(values) + xshift]
-    linechart.DataLabels = labels[len(labels) - termui.TermWidth() + xshift:len(labels) + xshift]
-
-	linechart.Mode = "dot"
-	linechart.Width = termui.TermWidth()
-	linechart.Height = termui.TermHeight()
-	linechart.X = 0
-	linechart.Y = 0
-	linechart.AxesColor = termui.ColorGreen
-	linechart.LineColor = termui.ColorCyan | termui.AttrBold
-
-
-	termui.Render(linechart)
-}
-
-func apiLookup(symbol string) (string){
-
-	key, err := ioutil.ReadFile("key")
-	check(err)
-
-	//if you really want to steal my API key, go for it
-	API_KEY := string(key)
-
-	resp, err := grequests.Get(fmt.Sprintf("https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&outputsize=full&symbol=%s&apikey=%s", symbol, API_KEY), nil)
-
-	check(err)
-
 	return resp.String()
-
 }
 
-func processJson (json_request, mode string)([]float64, []string) {
+func parseBatchJson(json_request string) ([]PVpair){
 	var result map[string]interface{}
+
+	list := []PVpair{}
 
 	json.Unmarshal([]byte(json_request), &result)
 
-	figures := []UnitFigures{}
-	labels := []string{}
 
-	keys := make([]string, 0)
+	for k := range result["Stock Quotes"].([]interface{}) {
+		var err error
+		newPair := PVpair{}
 
-	//sort the keys so we can iterate over the map in order
-	for k, _ := range result[fmt.Sprintf("Time Series (%s)", "Daily")].(map[string]interface{}) {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
+		newPair.symbol = result["Stock Quotes"].([]interface{})[k].(map[string]interface{})["1. symbol"].(string)
+		newPair.price, err = strconv.ParseFloat(result["Stock Quotes"].([]interface{})[k].(map[string]interface{})["2. price"].(string),64)
+		newPair.volume, err = strconv.ParseInt(result["Stock Quotes"].([]interface{})[k].(map[string]interface{})["3. volume"].(string), 0, 0)
 
-	for _, k := range keys {
-
-		figures = append(figures, getFigures(result[fmt.Sprintf("Time Series (%s)", "Daily")].(map[string]interface{})[k].(map[string]interface{})))
-		labels = append(labels, k)
+		check(err)
+		list = append(list, newPair)
 	}
 
-	figures_narrow := []float64{}
+	return list
 
-	//grab the values indicated by the mode string
-
-	switch mode {
-		case "High", "high":
-			for _, figure := range figures{
-				figures_narrow = append(figures_narrow, float64(figure.High))
-				}
-
-		case "Low", "low":
-			for _, figure := range figures{
-				figures_narrow = append(figures_narrow, float64(figure.Low))
-			}
-
-		case "Open", "open":
-			for _, figure := range figures{
-				figures_narrow = append(figures_narrow, float64(figure.Open))
-			}
-		
-		case "Close", "close":
-			for _, figure := range figures{
-				figures_narrow = append(figures_narrow, float64(figure.Close))
-			}
-		
-		case "Volume", "volume":
-			for _, figure := range figures{
-				figures_narrow = append(figures_narrow, float64(figure.Volume))
-			}
-		
-	}
-
-	return figures_narrow, labels
+	
 }
 
 func initTermui(){
@@ -166,46 +69,83 @@ func check(e error){
 	}
 }
 
-
-func main () {
-
-	//set the symbol from the command line (temporary)
-	SYMBOL, MODE := os.Args[1] ,os.Args[2]
-
-	json_request := apiLookup(SYMBOL)
-
-	//Initialize the UI
-	initTermui()
+func showTicker(req string, selected int){
 
 
-	figures_processed, labels := processJson(json_request, MODE)
-    xshift := 0
-	
 
-	displayGraph(figures_processed, labels, SYMBOL, MODE, xshift)
+	list := parseBatchJson(req)
+
+	fields := []string{}
+
+	fields = append(fields, "SYMBOL      PRICE       VOLUME")
+
+	for s := range list{
+		var str string
+		space1 := "            "
+		space2 := "            "
+
+		//more gross one liners...
+		lineSpaces := termui.TermWidth() - (len(space1) + len(space2) + len(fmt.Sprintf("%d", list[s].volume))) - 3
+
+		//calculate the formatting for the spaces
+		space1 = space1[:len(space1) - len(list[s].symbol)]
+		space2 = space2[:len(space2) - len(fmt.Sprintf("%.2f", list[s].price))]
 
 
-    //key triggers, q to quit
-    
-    termui.Handle("/sys/kbd/q", func(termui.Event){
-        termui.StopLoop()
-        })
-    termui.Handle("/sys/kbd/<left>", func(termui.Event){
-        if -(xshift) < len(labels){
-            xshift -= 5
-            displayGraph(figures_processed, labels, SYMBOL, MODE, xshift)
-        }
-    })
+		spaceEnd := strings.Repeat(" ", lineSpaces)
 
-    termui.Handle("/sys/kbd/<right>", func(termui.Event){
-        if xshift < 0 {
-            xshift += 5 
-            displayGraph(figures_processed, labels, SYMBOL, MODE, xshift)
-        }
-    })
-    termui.Loop()
 
-	termui.Close()
+		if s == selected {
+			str = fmt.Sprintf("[%s%s%.2f%s%d%s](fg-black,bg-white)", list[s].symbol, space1, list[s].price, space2, list[s].volume, spaceEnd)
+		} else {
+			str = fmt.Sprintf("%s%s%.2f%s%d%s", list[s].symbol, space1, list[s].price, space2, list[s].volume, spaceEnd)
+		}
+		fields = append(fields, str)
+
+	}
+
+
+	ls := termui.NewList()
+	ls.Items = fields
+	ls.BorderLabel = "DJIA"
+	ls.Height = termui.TermHeight()
+	ls.Width = termui.TermWidth()
+
+	termui.Render(ls)
+
+
 
 }
+
+func tickerHandler(API_KEY string){
+	//setup the ticker (Initial API call)
+	selected := 1
+	req := apiLookupRealtime(API_KEY)
+	showTicker(req, selected)
+
+	termui.Handle("/sys/kbd/q", func(termui.Event) {
+		termui.StopLoop()
+	})
+	termui.Handle("/sys/kbd/<up>", func(termui.Event) {
+		if selected > 0 {
+			selected--
+			showTicker(req, selected)
+		}
+	})
+	termui.Handle("/sys/kbd/<down>", func(termui.Event) {
+		if selected < 30 {
+			selected++
+			showTicker(req, selected)
+		}
+	})
+	termui.Handle("/sys/kbd/<enter>", func(termui.Event) {
+		graphHandler(API_KEY, DOW_SYMB[selected])
+	})
+
+	termui.Loop()
+
+}
+
+
+
 
