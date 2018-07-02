@@ -7,8 +7,7 @@ import (
 
 func main () {
 
-	//set the symbol from the command line (temporary)
-
+	//Read the API key
 	b_key, err := ioutil.ReadFile("key")
 	check(err)
 	API_KEY := string(b_key)
