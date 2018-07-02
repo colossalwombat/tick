@@ -14,7 +14,10 @@ Terminal based stock watching app, capable of graphing all 30 companies on the D
 ## Dependencies
 Depends on:
 https://github.com/gizak/termui
+
 https://github.com/levigross/grequests
+
+Use the latest everything and you should be good.
 
 Can be installed with:
 `go get -u github.com/gizak/termui github.com/levigross/grequests`
