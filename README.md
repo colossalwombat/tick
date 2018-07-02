@@ -22,3 +22,6 @@ Use the latest everything and you should be good.
 Can be installed with:
 `go get -u github.com/gizak/termui github.com/levigross/grequests`
 
+## Licence
+Licenced under the MIT Licence
+
