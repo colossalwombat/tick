@@ -1,21 +1,21 @@
 package main
 
 import (
-	"io/ioutil"
-	"github.com/gizak/termui"
+	tm "github.com/nsf/termbox-go"
+	"os"
 )
 
 func main () {
-
-	//Read the API key
-	b_key, err := ioutil.ReadFile("key")
+	//wipe the log file
+	file, err := os.Create("log.txt")
 	check(err)
-	API_KEY := string(b_key)
+	file.Close()
+
 
 	//Initialize the UI
-	initTermui()
-	defer termui.Close()
+	tm.Init()
+	defer tm.Close()
 
-	tickerHandler(API_KEY)
+	tickerHandler()
 
 }
