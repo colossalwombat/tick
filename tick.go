@@ -1,194 +1,208 @@
-package main 
-import (
-	"github.com/levigross/grequests"
-	"fmt"
-	"strings"
-	"github.com/gizak/termui"
-	"encoding/json"
-	"strconv"
-	"io/ioutil"
-	"time"
+package main
 
+import (
+	"encoding/json"
+	"fmt"
+	"github.com/levigross/grequests"
+	tb "github.com/nsf/termbox-go"
+	"os"
+	"time"
 )
 
-//define the 30 companies from the DJIA
-var DOW_SYMB = []string{"MMM", "AXP", "AAPL", "BA", "CAT", "CVX", "CSCO", "KO", "DIS", "DWDP", "XOM", "GE", "GS", "HD", "IBM", "INTC", "JNJ", "JPM", "MCD", "MRK", "MSFT", "NKE", "PFE", "PG", "TRV", "UTX", "UNH", "VZ", "V", "WMT"}
-
-type PVpair struct {
-	symbol string
-	price float64
-	volume int64
-	colour int
+type stockFigures struct {
+	Symbol                         string
+	Price                          float64
+	Volume                         int
+	Open, Close, High, Low, Change float64
+	MarketCap                      int
+	High52, Low52, YTDChange       float64
+	Colour                         tb.Attribute
 }
 
-//store the last call
-var oldPV = []PVpair{}
-
-
-func apiLookupRealtime(key string) (string){
-
-
-	symbols_formatted := strings.Join(DOW_SYMB, ",")
-
-	resp, err := grequests.Get(fmt.Sprintf("https://www.alphavantage.co/query?function=BATCH_STOCK_QUOTES&symbols=%s&apikey=%s", symbols_formatted, key), nil)
-	check(err)
-	ioutil.WriteFile("log.txt", []byte(fmt.Sprintf("https://www.alphavantage.co/query?function=BATCH_STOCK_QUOTES&symbols=%s&apikey=%s	%s", symbols_formatted, key, resp.String())), 0777)
-	return resp.String()
+type Ticker struct {
+	MARKET_OPEN  bool
+	STOCKS       []string
+	API_RETURN   []string
+	FIGURES_LIST []stockFigures
 }
 
-func parseBatchJson(json_request string) ([]PVpair){
-	var result map[string]interface{}
-
-	list := []PVpair{}
-
-	json.Unmarshal([]byte(json_request), &result)
-
-
-	for k := range result["Stock Quotes"].([]interface{}) {
-		var err error
-		newPair := PVpair{}
-
-		newPair.symbol = result["Stock Quotes"].([]interface{})[k].(map[string]interface{})["1. symbol"].(string)
-		newPair.price, err = strconv.ParseFloat(result["Stock Quotes"].([]interface{})[k].(map[string]interface{})["2. price"].(string),64)
-		newPair.volume, err = strconv.ParseInt(result["Stock Quotes"].([]interface{})[k].(map[string]interface{})["3. volume"].(string), 0, 0)
-
-		if len(oldPV) > 1{
-			if newPair.price > oldPV[k].price {
-				newPair.colour = 1
-			} else if newPair.price == oldPV[k].price {
-				newPair.colour = 0
-			} else {
-				newPair.colour = -1
-			}
-		} else {
-			newPair.colour = 0
-		}
-
-		check(err)
-		list = append(list, newPair)
-	}
-
-	return list
-
-	
-}
-
-func initTermui(){
-	err := termui.Init()
-	check(err)	
-}
-
-
-
-func check(e error){
-	if e != nil{
+func check(e error) {
+	if e != nil {
 		panic(e)
 	}
 }
 
-func showTicker(req string, selected int){
+func logString(str string) {
+	file, err := os.OpenFile("log.txt", os.O_APPEND|os.O_WRONLY, 0644)
+	defer file.Close()
+	check(err)
 
+	str += string('\n')
 
+	_, err = file.WriteString(str)
 
-	list := parseBatchJson(req)
+}
 
-	oldPV = list
+func isNYSEOpen() bool {
 
-	fields := []string{}
+	loc, err := time.LoadLocation("America/New_York")
+	check(err)
 
-	fields = append(fields, "SYMBOL      PRICE       VOLUME")
+	//first check if it's closed
+	if time.Now().After(time.Date(time.Now().Year(), time.Now().Month(), time.Now().Day(), 15, 59, 0, 0, loc)) || time.Now().Before(time.Date(time.Now().Year(), time.Now().Month(), time.Now().Day(), 9, 30, 0, 0, loc)) {
+		return false
+	} else {
+		return true
+	}
+}
 
-	for s := range list{
-		var str string
-		space1 := "            "
-		space2 := "            "
+func (tick *Ticker) verifySecurityExists(symbol string) bool {
 
-		//more gross one liners...
-		lineSpaces := termui.TermWidth() - (len(space1) + len(space2) + len(fmt.Sprintf("%d", list[s].volume))) - 3
+	request, err := grequests.Get(fmt.Sprintf("https://api.iextrading.com/1.0/stock/%s/quote", symbol), nil)
+	check(err)
 
-		//calculate the formatting for the spaces
-		space1 = space1[:len(space1) - len(list[s].symbol)]
-		space2 = space2[:len(space2) - len(fmt.Sprintf("%.2f", list[s].price))]
+	if request.String() == "Unknown symbol" {
+		return false
+	}
+	return true
+}
 
+func (tick *Ticker) apiLookup() {
 
-		spaceEnd := strings.Repeat(" ", lineSpaces)
+	tick.API_RETURN = make([]string, 0)
 
-		//color the proper text
-		var cur_symbol string
+	for k := range tick.STOCKS {
+		request, err := grequests.Get(fmt.Sprintf("https://api.iextrading.com/1.0/stock/%s/quote", tick.STOCKS[k]), nil)
+		check(err)
+		tick.API_RETURN = append(tick.API_RETURN, request.String())
+	}
+}
 
-		cur_symbol = list[s].symbol
+//parse the long form data for every stock
+func (tick *Ticker) parseBatch() bool {
 
-		
+	tick.FIGURES_LIST = make([]stockFigures, 0)
 
+	for s := range tick.API_RETURN {
 
-		if s == selected {
-			str = fmt.Sprintf("[%s%s%.2f%s%d%s](fg-black,bg-white)", list[s].symbol, space1, list[s].price, space2, list[s].volume, spaceEnd)
+		var result map[string]interface{}
+		json.Unmarshal([]byte(tick.API_RETURN[s]), &result)
+
+		figure := stockFigures{}
+
+		//set the fields by unmapping the json values
+		figure.Symbol = result["symbol"].(string)
+		figure.Open = result["open"].(float64)
+		figure.Close = result["close"].(float64)
+		figure.High = result["high"].(float64)
+		figure.Low = result["low"].(float64)
+		figure.Change = result["changePercent"].(float64) * 100
+		figure.Price = result["latestPrice"].(float64)
+		figure.MarketCap = int(result["marketCap"].(float64) / 1000000000)
+		figure.High52 = result["week52High"].(float64)
+		figure.Low52 = result["week52Low"].(float64)
+		figure.YTDChange = result["ytdChange"].(float64) * 100
+
+		//this only works when the markets open
+		if tick.MARKET_OPEN {
+			figure.Volume = int(result["iexVolume"].(float64))
 		} else {
-			switch list[s].colour {
-						case 1:
-							str = fmt.Sprintf("[%s%s%.2f%s%d%s](fg-green)", cur_symbol, space1, list[s].price, space2, list[s].volume, spaceEnd)
-						case 0:
-							str = fmt.Sprintf("[%s%s%.2f%s%d%s](fg-blue)", cur_symbol, space1, list[s].price, space2, list[s].volume, spaceEnd)
-						case -1:
-							str = fmt.Sprintf("[%s%s%.2f%s%d%s](fg-red)", cur_symbol, space1, list[s].price, space2, list[s].volume, spaceEnd)	
-					}
-			
+			figure.Volume = 0
 		}
-		fields = append(fields, str)
 
+		//set the colour depending on the days change %
+		if figure.Change > 0.0 {
+			figure.Colour = tb.ColorGreen
+		} else if figure.Change == 0.0 {
+			figure.Colour = tb.ColorWhite
+		} else {
+			figure.Colour = tb.ColorRed
+		}
+
+		tick.FIGURES_LIST = append(tick.FIGURES_LIST, figure)
 	}
 
-
-	ls := termui.NewList()
-	ls.Items = fields
-	ls.BorderLabel = "DJIA"
-	ls.Height = termui.TermHeight()
-	ls.Width = termui.TermWidth()
-
-
-	termui.Render(ls)
-
-
+	return true
 
 }
 
-func tickerHandler(API_KEY string){
+func tickerHandler() {
+
+	tick := &Ticker{
+		STOCKS:      []string{"MMM", "AXP", "AAPL", "BA", "CAT", "CVX", "CSCO", "KO", "DIS", "DWDP", "XOM", "GE", "GS", "HD", "IBM", "INTC", "JNJ", "JPM", "MCD", "MRK", "MSFT", "NKE", "PFE", "PG", "TRV", "UTX", "UNH", "VZ", "V", "WMT"},
+		MARKET_OPEN: isNYSEOpen(),
+	}
 	//setup the ticker (Initial API call)
-	selected := 1
-	req := apiLookupRealtime(API_KEY)
-	showTicker(req, selected)
+	tick.apiLookup()
+	tick.parseBatch()
 
-	termui.Handle("/sys/kbd/q", func(termui.Event) {
-		termui.StopLoop()
-	})
-	termui.Handle("/sys/kbd/<up>", func(termui.Event) {
-		if selected > 0 {
-			selected--
-			showTicker(req, selected)
+	//Init the screen
+	s := &Screen{}
+	s.setTicker(tick)
+
+	//established the thread for the listener
+	event_queue := make(chan tb.Event)
+	go func() {
+		for {
+			event_queue <- tb.PollEvent()
 		}
-	})
-	termui.Handle("/sys/kbd/<down>", func(termui.Event) {
-		if selected < 30 {
-			selected++
-			showTicker(req, selected)
+	}()
+
+	refresh := make(chan bool)
+	go func() {
+		for {
+			tick.apiLookup()
+			refresh <- tick.parseBatch()
+			time.Sleep(3 * time.Second)
 		}
-	})
-	termui.Handle("/sys/kbd/<enter>", func(termui.Event) {
-		graphHandler(API_KEY, DOW_SYMB[selected])
-	})
+	}()
 
-	//init the new timer
-	termui.Merge("/timer/4s", termui.NewTimerCh(time.Second * 4))
-	
-	termui.Handle("/timer/4s", func(termui.Event) {
-		req = apiLookupRealtime(API_KEY)
-		showTicker(req, selected)
-	})
+	//logic that handles the keyboard interaction
+HANDLE:
+	for {
+		select {
+		case ev := <-event_queue:
+			switch ev.Type {
+			case tb.EventKey:
+				if ev.Key == tb.KeyCtrlQ {
+					break HANDLE
+				}
+				if ev.Key == tb.KeyArrowUp {
+					if s.Selected > 0 {
+						s.Selected--
+						s.setTicker(tick)
+					}
+				}
+				if ev.Key == tb.KeyArrowDown {
+					if s.Selected < len(tick.STOCKS)-1 {
+						s.Selected++
+						s.setTicker(tick)
+					}
+				}
+				if ev.Key == tb.KeySpace {
+					tick.apiLookup()
+					tick.parseBatch()
+					s.setTicker(tick)
+				}
+				if ev.Key == tb.KeyCtrlA {
+					if !tick.addStock(s) {
+						s.setTicker(tick)
+						continue
+					}
+					tick.apiLookup()
+					tick.parseBatch()
+					s.setTicker(tick)
+				}
+				if ev.Key == tb.KeyEnter {
+					s.chartMenuHandler(tick.STOCKS[s.Selected])
+				}
 
-	termui.Loop()
+			case tb.EventResize:
+				s.setTicker(tick)
 
+			}
+		case <-refresh:
+			s.setTicker(tick)
+		}
+	}
 }
-
-
-
-
