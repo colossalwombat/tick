@@ -1,130 +1,117 @@
 package main
 
-import(
-	"github.com/levigross/grequests"
+import (
 	"fmt"
-	"strings"
 	tb "github.com/nsf/termbox-go"
-	"os"
 	"reflect"
 	"sort"
-	"time"
-	"encoding/json"
+	"strings"
 )
 
-func drawHelp(helpMsg string) {
-	_, line := tb.Size()
+type Screen struct {
+	Fields                  []string
+	Colours                 []tb.Attribute
+	Width, Height, Selected int
+}
+
+func (s *Screen) refreshSize() {
+	s.Width, s.Height = tb.Size()
+}
+
+func (s *Screen) drawHelp(helpMsg string) {
+	s.refreshSize()
 
 	for i := 0; i < len(helpMsg); i++ {
-		tb.SetCell(i, line - 1, rune(helpMsg[i]), tb.ColorWhite, tb.ColorBlue)
+		tb.SetCell(i, s.Height-1, rune(helpMsg[i]), tb.ColorBlack, tb.ColorCyan)
 	}
 
 }
 
-func drawTicker(fields []string, colours []tb.Attribute, selected int){
-	width, height := tb.Size()
+func (s *Screen) drawTicker() {
+	s.refreshSize()
 
 	//set the header
 	title := "Tick"
 	char := 0
-	for i := 0; i < width; i++{
+	for i := 0; i < s.Width; i++ {
 		//check if we should be printing the title letters
-		if i > (width - len(title)) / 2 && char < len(title) {
+		if i > (s.Width-len(title))/2 && char < len(title) {
 			tb.SetCell(i, 0, rune(title[char]), tb.ColorWhite, 0)
 			char++
 		} else {
 			tb.SetCell(i, 0, rune(0), 0, 0)
 		}
 	}
-	for i := 0; i < width; i++{
-		if i < len(fields[0]) {
-			tb.SetCell(i, 1, rune(fields[0][i]), tb.ColorBlue, tb.ColorWhite)
+	for i := 0; i < s.Width; i++ {
+		if i < len(s.Fields[0]) {
+			tb.SetCell(i, 1, rune(s.Fields[0][i]), tb.ColorBlack, tb.ColorCyan)
 		} else {
-			tb.SetCell(i, 1, rune(0), 0, tb.ColorWhite)
+			tb.SetCell(i, 1, rune(0), 0, tb.ColorCyan)
 		}
 	}
 	//remove the header
-	fields = fields[1:]
+	s.Fields = s.Fields[1:]
 
-	//calculate which fields should be displayed
+	//calculate which fields should be displayed TODO fix this
 	var first, last int
-	if selected < height - 3 {
+	if s.Selected < s.Height-3 {
 		first = 0
-		last = len(fields)
+		last = len(s.Fields)
 	} else {
-		first = selected - ((height - 3) / 2)
+		first = s.Selected - ((s.Height - 3) / 2)
 
 		//check if the end of the array is still off the bottom of the screen
-		if selected + ((height - 3) / 2) < len(fields){
-			last = selected + ((height - 3) / 2)
+		if s.Selected+((s.Height-3)/2) < len(s.Fields) {
+			last = s.Selected + ((s.Height - 3) / 2)
 		} else {
-			last = len(fields)
+			last = len(s.Fields)
 		}
 	}
 
-
 	//do the rest of the fields
-	for row := range fields[first:last]{
-		if row == selected {
-			for i := range fields[row]{
-				if colours[row] != tb.ColorWhite {
-					tb.SetCell(i, row + 2, rune(fields[row][i]), colours[row], tb.ColorWhite)
+	for row := range s.Fields[first:last] {
+		if row == s.Selected {
+			for i := range s.Fields[row] {
+				if s.Colours[row] != tb.ColorWhite {
+					tb.SetCell(i, row+2, rune(s.Fields[row][i]), s.Colours[row], tb.ColorWhite)
 				} else {
-					tb.SetCell(i, row + 2, rune(fields[row][i]), tb.ColorBlack, tb.ColorWhite)
+					tb.SetCell(i, row+2, rune(s.Fields[row][i]), tb.ColorBlack, tb.ColorWhite)
 				}
 			}
-		} else{
-			for i := range fields[row]{
-				tb.SetCell(i, row + 2, rune(fields[row][i]), colours[row], 0)
-			} 
+		} else {
+			for i := range s.Fields[row] {
+				tb.SetCell(i, row+2, rune(s.Fields[row][i]), s.Colours[row], 0)
+			}
+		}
+	}
+
+	//clear the rest of the screenhttp://reddit.com/http://reddit.com/http://reddit.com/
+	for row := last + 1; row < s.Height; row++ {
+		for col := 0; col < s.Width; col++ {
+			tb.SetCell(col, row, 0, 0, 0)
 		}
 	}
 
 	helpMsg := "Close [Ctrl-Q]	Change Selection [Up/Down]	Refresh (temporary) [Space] Add Stock [Crtl-A]"
 
-	drawHelp(helpMsg)
+	s.drawHelp(helpMsg)
 
 	tb.Flush()
 
-
-	return
 }
 
+func (s *Screen) setTicker(tick *Ticker) {
+	s.Fields = make([]string, 0)
 
-func setTicker(list []stockFigures, selected int){
+	s.Fields = append(s.Fields, "SYMBOL      PRICE       VOLUME(m)   OPEN        CLOSE       HIGH        LOW         CHANGE      MARKETCAP   52WKHIGH    52WKLOW     YTDCHANGE")
 
-	
-	if !(reflect.DeepEqual(oldPV, list)) {
-		oldPV = list
-	}
-
-	fields := []string{}
-	colours := []tb.Attribute{}
-
-	fields = append(fields, "SYMBOL      PRICE       VOLUME(m)   OPEN        CLOSE       HIGH        LOW         CHANGE      MARKETCAP   52WKHIGH    52WKLOW     YTDCHANGE")
-
-	for s := range list{
-		/*space := strings.Repeat(" ", 12)
-		width,_ := tb.Size()
-
-		//calculate the space sizes
-		lineSpaces := width - (len(space)*2 + len(fmt.Sprintf("%d", list[s].volume))) - 3
-		space1 := space[:len(space) - len(list[s].symbol)]
-		space2 := space[:len(space) - len(fmt.Sprintf("%.2f", list[s].price))]
-		space3 := space[:len(space) - len(fmt.Sprintf("%d", list[s].volume))]
-		space4 := space[:len(space) - len(fmt.Sprintf("%.2f", list[s].open))]
-		space5 := space[:len(space) - len(fmt.Sprintf("%.2f", list[s].close))]
-		spaceEnd := strings.Repeat(" ", lineSpaces)
-
-		//format the field
-		field := fmt.Sprintf("%s%s%.2f%s%d%s%.2f%s%.2f%s%.2f%s", list[s].symbol, space1, list[s].price, space2, list[s].volume, space3, list[s].open, space4, list[s].close, space5, list[s].change, spaceEnd)*/
-
+	for k := range tick.FIGURES_LIST {
 
 		//calculate the spaces and format the field
-		v := reflect.ValueOf(&list[s]).Elem()
+		v := reflect.ValueOf(&tick.FIGURES_LIST[k]).Elem()
 		var field string
 
-		for i := 0; i < v.NumField(); i++{
+		for i := 0; i < v.NumField(); i++ {
 			var strToAdd string
 			switch v.Field(i).Interface().(type) {
 			case float64:
@@ -134,34 +121,35 @@ func setTicker(list []stockFigures, selected int){
 			case string:
 				strToAdd += v.Field(i).Interface().(string)
 			}
-			field += strToAdd + strings.Repeat(" ", 12 - len(strToAdd))
+			//fix for the negative values being out of line
+			field += strToAdd + strings.Repeat(" ", 12-len(strToAdd))
 		}
 
 		//add it to the list
-		fields = append(fields, field)
-		colours = append(colours, list[s].Colour)
+		s.Fields = append(s.Fields, field)
+		s.Colours = append(s.Colours, tick.FIGURES_LIST[k].Colour) //this is stupid
 
 	}
 
-	drawTicker(fields, colours, selected)
+	s.drawTicker()
 }
 
-func displayAddMenu(){
-	width, height := tb.Size()
-	tb.Clear(0,0)
+func (s *Screen) displayAddMenu() {
+	s.refreshSize()
+	tb.Clear(0, 0)
 
 	menuText := "Enter the name (symbol) of the stock to add:"
 
 	for i := 0; i < len(menuText); i++ {
-		tb.SetCell((width - len(menuText)) / 2 + i, height/2 - 1, rune(menuText[i]), tb.ColorBlack, tb.ColorWhite)
+		tb.SetCell((s.Width-len(menuText))/2+i, s.Height/2-1, rune(menuText[i]), tb.ColorBlack, tb.ColorWhite)
 	}
 
-	drawHelp("Cancel [ESC]")
+	s.drawHelp("Cancel [ESC]")
 
 	tb.Flush()
 }
 
-func takeInput() (string, bool){
+func takeInput() (string, bool) {
 	symbol := ""
 	for {
 		//poll for the key entry, breaking on esc
@@ -169,21 +157,21 @@ func takeInput() (string, bool){
 		case tb.EventKey:
 			if ev.Key == tb.KeyEsc {
 				return symbol, false
-			} 
+			}
 			if ev.Key == tb.KeyEnter {
 				return strings.ToUpper(symbol), true
-			} 
+			}
 			if ev.Key == tb.KeyBackspace2 && len(symbol) > 0 {
 				width, height := tb.Size()
-				symbol = symbol[:len(symbol) - 1]
+				symbol = symbol[:len(symbol)-1]
 
-				tb.SetCell(width / 2 - 23 + len(symbol) + 1, height / 2, 0, 0, 0)
+				tb.SetCell(width/2-23+len(symbol)+1, height/2, 0, 0, 0)
 				tb.Flush()
 			} else {
 				width, height := tb.Size()
 
 				symbol += string(ev.Ch)
-				tb.SetCell(width / 2 - 23 + len(symbol), height / 2, ev.Ch, 0, 0)
+				tb.SetCell(width/2-23+len(symbol), height/2, ev.Ch, 0, 0)
 				tb.Flush()
 			}
 		case tb.EventResize:
@@ -195,16 +183,20 @@ func takeInput() (string, bool){
 	}
 }
 
-
-func addStock(){
-	displayAddMenu()
+func (tick *Ticker) addStock(s *Screen) {
+	s.displayAddMenu()
 
 	symb, complete := takeInput()
 
-	if !complete{
+	if !complete {
 		return
 	}
+	logString("Before")
+	logString(fmt.Sprintln(tick.STOCKS))
 
-	STOCKS = append(STOCKS, symb)
-	sort.Strings(STOCKS)
+	tick.STOCKS = append(tick.STOCKS, symb)
+	sort.Strings(tick.STOCKS)
+
+	logString("After")
+	logString(fmt.Sprintln(tick.STOCKS))
 }

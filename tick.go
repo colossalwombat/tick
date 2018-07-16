@@ -1,42 +1,39 @@
-package main 
+package main
+
 import (
-	"github.com/levigross/grequests"
+	"encoding/json"
 	"fmt"
-	"strings"
+	"github.com/levigross/grequests"
 	tb "github.com/nsf/termbox-go"
 	"os"
-	"reflect"
-	"sort"
 	"time"
-	"encoding/json"
-	"math/rand"
 )
 
 type stockFigures struct {
-	Symbol string
-	Price float64
-	Volume int
+	Symbol                         string
+	Price                          float64
+	Volume                         int
 	Open, Close, High, Low, Change float64
-	MarketCap int
-	High52, Low52, YTDChange float64
-	Colour tb.Attribute
+	MarketCap                      int
+	High52, Low52, YTDChange       float64
+	Colour                         tb.Attribute
 }
 
 type Ticker struct {
-	MARKET_OPEN bool
-	STOCKS []string
-	SELECTED int
+	MARKET_OPEN  bool
+	STOCKS       []string
+	API_RETURN   []string
+	FIGURES_LIST []stockFigures
+}
 
-	}
-
-func check(e error){
-	if e != nil{
+func check(e error) {
+	if e != nil {
 		panic(e)
 	}
 }
 
-func logString(str string){
-	file, err := os.OpenFile("log.txt", os.O_APPEND | os.O_WRONLY, 0644)
+func logString(str string) {
+	file, err := os.OpenFile("log.txt", os.O_APPEND|os.O_WRONLY, 0644)
 	defer file.Close()
 	check(err)
 
@@ -46,54 +43,39 @@ func logString(str string){
 
 }
 
-
-func isNYSEOpen() (bool){
+func isNYSEOpen() bool {
 
 	loc, err := time.LoadLocation("America/New_York")
 	check(err)
 
 	//first check if it's closed
-	if time.Now().After(time.Date(time.Now().Year(), time.Now().Month(), time.Now().Day(), 15, 59, 0, 0, loc)) || time.Now().Before(time.Date(time.Now().Year(), time.Now().Month(), time.Now().Day(), 9, 30, 0, 0, loc)){
+	if time.Now().After(time.Date(time.Now().Year(), time.Now().Month(), time.Now().Day(), 15, 59, 0, 0, loc)) || time.Now().Before(time.Date(time.Now().Year(), time.Now().Month(), time.Now().Day(), 9, 30, 0, 0, loc)) {
 		return false
 	} else {
 		return true
 	}
 }
 
-func apiLookup() ([]string) {
+func (tick *Ticker) apiLookup() {
 
-	list := []string{}
+	tick.API_RETURN = make([]string, 0)
 
-	if MARKET_OPEN{
-
-		for k := range STOCKS {
-			request, err := grequests.Get(fmt.Sprintf("https://api.iextrading.com/1.0/stock/%s/quote", STOCKS[k]), nil)
-			check(err)
-			list = append(list, request.String())
-		}
-		
-	} else {
-		//otherwise pull the old data
-		for k := range STOCKS {
-			request, err := grequests.Get(fmt.Sprintf("https://api.iextrading.com/1.0/stock/%s/chart/1m", STOCKS[k]), nil)
-			check(err)
-			list = append(list, request.String())
-		}
+	for k := range tick.STOCKS {
+		request, err := grequests.Get(fmt.Sprintf("https://api.iextrading.com/1.0/stock/%s/quote", tick.STOCKS[k]), nil)
+		check(err)
+		tick.API_RETURN = append(tick.API_RETURN, request.String())
 	}
-
-	return list
 }
 
-
 //parse the long form data for every stock
-func parseBatch(reqs []string) ([]stockFigures){
+func (tick *Ticker) parseBatch() bool {
 
-	list := []stockFigures{}
+	tick.FIGURES_LIST = make([]stockFigures, 0)
 
-	for s := range reqs{
-		
+	for s := range tick.API_RETURN {
+
 		var result map[string]interface{}
-		json.Unmarshal([]byte(reqs[s]), &result)
+		json.Unmarshal([]byte(tick.API_RETURN[s]), &result)
 
 		figure := stockFigures{}
 
@@ -103,7 +85,6 @@ func parseBatch(reqs []string) ([]stockFigures){
 		figure.Close = result["close"].(float64)
 		figure.High = result["high"].(float64)
 		figure.Low = result["low"].(float64)
-		figure.Volume = int(result["iexVolume"].(float64))
 		figure.Change = result["changePercent"].(float64) * 100
 		figure.Price = result["latestPrice"].(float64)
 		figure.MarketCap = int(result["marketCap"].(float64) / 1000000000)
@@ -111,7 +92,12 @@ func parseBatch(reqs []string) ([]stockFigures){
 		figure.Low52 = result["week52Low"].(float64)
 		figure.YTDChange = result["ytdChange"].(float64) * 100
 
-
+		//this only works when the markets open
+		if tick.MARKET_OPEN {
+			figure.Volume = int(result["iexVolume"].(float64))
+		} else {
+			figure.Volume = 0
+		}
 
 		//set the colour depending on the days change %
 		if figure.Change > 0.0 {
@@ -122,25 +108,26 @@ func parseBatch(reqs []string) ([]stockFigures){
 			figure.Colour = tb.ColorRed
 		}
 
-
-		list = append(list, figure)
+		tick.FIGURES_LIST = append(tick.FIGURES_LIST, figure)
 	}
 
-	return list
+	return true
+
 }
 
-
-func tickerHandler() (*Ticker){
+func tickerHandler() {
 
 	tick := &Ticker{
-		STOCKS: ["MMM", "AXP", "AAPL", "BA", "CAT", "CVX", "CSCO", "KO", "DIS", "DWDP", "XOM", "GE", "GS", "HD", "IBM", "INTC", "JNJ", "JPM", "MCD", "MRK", "MSFT", "NKE", "PFE", "PG", "TRV", "UTX", "UNH", "VZ", "V", "WMT"]
+		STOCKS:      []string{"MMM", "AXP", "AAPL", "BA", "CAT", "CVX", "CSCO", "KO", "DIS", "DWDP", "XOM", "GE", "GS", "HD", "IBM", "INTC", "JNJ", "JPM", "MCD", "MRK", "MSFT", "NKE", "PFE", "PG", "TRV", "UTX", "UNH", "VZ", "V", "WMT"},
 		MARKET_OPEN: isNYSEOpen(),
-		SELECTED: 0
 	}
 	//setup the ticker (Initial API call)
-	reqLong := apiLookup()
-	list := parseBatch(reqLong)
-	setTicker(list, selected)
+	tick.apiLookup()
+	tick.parseBatch()
+
+	//Init the screen
+	s := &Screen{}
+	s.setTicker(tick)
 
 	//established the thread for the listener
 	event_queue := make(chan tb.Event)
@@ -150,57 +137,56 @@ func tickerHandler() (*Ticker){
 		}
 	}()
 
-	refresh := make(chan []stockFigures)
-	go func(){
+	refresh := make(chan bool)
+	go func() {
 		for {
 			logString("Refreshing the data")
-			req := apiLookup()
-			refresh <- parseBatch(req)
+			tick.apiLookup()
+			refresh <- tick.parseBatch()
 			time.Sleep(3 * time.Second)
 		}
 	}()
 
-
-//logic that handles the keyboard interaction
+	//logic that handles the keyboard interaction
 HANDLE:
 	for {
-		select{
+		select {
 		case ev := <-event_queue:
 			switch ev.Type {
-				case tb.EventKey:
-					if ev.Key == tb.KeyCtrlQ {
-						break HANDLE
-					}
-					if ev.Key == tb.KeyArrowUp {
-						if selected > 0 {
-							selected--
-							setTicker(list, selected)
-						}
-					}
-					if ev.Key == tb.KeyArrowDown {
-						if selected < len(STOCKS) - 1 {
-							selected++ 
-							setTicker(list, selected)
-						}
-					}
-					if ev.Key == tb.KeySpace {
-						reqLong = apiLookup()
-						list = parseBatch(reqLong)
-						setTicker(list, selected)
-					}
-					if ev.Key == tb.KeyCtrlA {
-						addStock()
-						reqLong = apiLookup()
-						list = parseBatch(reqLong)
-						setTicker(list, selected)
-					}
-
-				case tb.EventResize:
-					setTicker(list, selected)
-
+			case tb.EventKey:
+				if ev.Key == tb.KeyCtrlQ {
+					break HANDLE
 				}
-		case r := <-refresh:
-			setTicker(r, selected)
+				if ev.Key == tb.KeyArrowUp {
+					if s.Selected > 0 {
+						s.Selected--
+						s.setTicker(tick)
+					}
+				}
+				if ev.Key == tb.KeyArrowDown {
+					if s.Selected < len(tick.STOCKS)-1 {
+						s.Selected++
+						s.setTicker(tick)
+					}
+				}
+				if ev.Key == tb.KeySpace {
+					tick.apiLookup()
+					tick.parseBatch()
+					s.setTicker(tick)
+				}
+				if ev.Key == tb.KeyCtrlA {
+					tick.addStock(s)
+					tick.apiLookup()
+					tick.parseBatch()
+					s.setTicker(tick)
+				}
+
+			case tb.EventResize:
+				s.setTicker(tick)
+
+			}
+		case <-refresh:
+			s.setTicker(tick)
 		}
 	}
 }
