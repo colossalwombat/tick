@@ -1,26 +1,21 @@
 # tick
-Terminal based stock watching app, capable of graphing all 30 companies on the DJIA. For know, you'll need to grab an API key from https://alphavantage.co and save it in a file with no extension called `key`. This will probably change in the future, if this project every becomes anything more than a novelty.
-
-## Currently
-- Pull data from 30 fixed companies
-- Display graph of closing price over 20 years
+Terminal based stock watching app, capable of tracking a user-modifiable list of securities and (soon) charting their performance over a defined interval. 
 
 ## TODO
 - Scrollable stock list
-- Multigraphing
-- Custom entries
-- Fix flickering(OSX)
+- Charting
+
 
 ## Dependencies
 Depends on:
-https://github.com/gizak/termui
+https://github.com/nsf/termbox-go
 
 https://github.com/levigross/grequests
 
 Use the latest everything and you should be good.
 
 Can be installed with:
-`go get -u github.com/gizak/termui github.com/levigross/grequests`
+`go get -u github.com/nsf/termbox-go github.com/levigross/grequests`
 
 ## Licence
 Licenced under the MIT Licence

@@ -53,20 +53,22 @@ func (s *Screen) drawTicker() {
 	s.Fields = s.Fields[1:]
 
 	//calculate which fields should be displayed TODO fix this
-	var first, last int
-	if s.Selected < s.Height-3 {
-		first = 0
-		last = len(s.Fields)
-	} else {
-		first = s.Selected - ((s.Height - 3) / 2)
-
-		//check if the end of the array is still off the bottom of the screen
-		if s.Selected+((s.Height-3)/2) < len(s.Fields) {
-			last = s.Selected + ((s.Height - 3) / 2)
-		} else {
+	first := 0
+	last := len(s.Fields)
+	/*
+		if s.Selected < s.Height-3 {
+			first = 0
 			last = len(s.Fields)
-		}
-	}
+		} else {
+			first = s.Selected - ((s.Height - 3) / 2)
+
+			//check if the end of the array is still off the bottom of the screen
+			if s.Selected+((s.Height-3)/2) < len(s.Fields) {
+				last = s.Selected + ((s.Height - 3) / 2)
+			} else {
+				last = len(s.Fields)
+			}
+		}*/
 
 	//do the rest of the fields
 	for row := range s.Fields[first:last] {
@@ -149,7 +151,19 @@ func (s *Screen) displayAddMenu() {
 	tb.Flush()
 }
 
-func takeInput() (string, bool) {
+func (s *Screen) displaySymbolNotFound() {
+	s.refreshSize()
+
+	text := "SYMBOL NOT FOUND"
+
+	for i := 0; i < len(text); i++ {
+		tb.SetCell((s.Width-len(text))/2+i, s.Height/2+1, rune(text[i]), tb.ColorBlack, tb.ColorWhite)
+	}
+	tb.Flush()
+
+}
+
+func (s *Screen) takeInput(tick *Ticker) (string, bool) {
 	symbol := ""
 	for {
 		//poll for the key entry, breaking on esc
@@ -159,19 +173,20 @@ func takeInput() (string, bool) {
 				return symbol, false
 			}
 			if ev.Key == tb.KeyEnter {
-				return strings.ToUpper(symbol), true
+				if tick.verifySecurityExists(symbol) {
+					return strings.ToUpper(symbol), true
+				} else {
+					s.displaySymbolNotFound()
+				}
+
 			}
 			if ev.Key == tb.KeyBackspace2 && len(symbol) > 0 {
-				width, height := tb.Size()
 				symbol = symbol[:len(symbol)-1]
-
-				tb.SetCell(width/2-23+len(symbol)+1, height/2, 0, 0, 0)
+				tb.SetCell(s.Width/2-23+len(symbol)+1, s.Height/2, 0, 0, 0)
 				tb.Flush()
 			} else {
-				width, height := tb.Size()
-
 				symbol += string(ev.Ch)
-				tb.SetCell(width/2-23+len(symbol), height/2, ev.Ch, 0, 0)
+				tb.SetCell(s.Width/2-23+len(symbol), s.Height/2, ev.Ch, 0, 0)
 				tb.Flush()
 			}
 		case tb.EventResize:
@@ -183,20 +198,85 @@ func takeInput() (string, bool) {
 	}
 }
 
-func (tick *Ticker) addStock(s *Screen) {
+func (s *Screen) printTextCentered(text string, height, padding int, fg, bg tb.Attribute) {
+	//print the padding
+	for i := 0; i < padding; i++ {
+			tb.SetCell((s.Width+len(text))/2+i, height, 0, 0, bg)
+		}
+	//dont even ask
+	if len(text) % 2 == 1 {
+		padding++
+	}
+	
+	for i := 0; i < padding; i++ {
+		tb.SetCell((s.Width-len(text))/2-i, height, 0, 0, bg)
+	}
+	
+	//print the text
+	for i := 0; i < len(text); i++ {
+		tb.SetCell((s.Width-len(text))/2+i, height, rune(text[i]), fg, bg)
+	}
+}
+
+func (s *Screen) displayChartMenu(symbol string, selected int) {
+	s.refreshSize()
+	tb.Clear(0, 0)
+
+	//draw the header
+	headerText := fmt.Sprintf("Chart for %s", symbol)
+	s.printTextCentered(headerText, s.Height/2-5, (24-len(headerText))/2, tb.ColorBlack, tb.ColorCyan)
+
+	//draw the options
+	options := []string{"One Day", "One Month", "Three Months", "Six Months", "Year To Date", "One Year", "Two Years", "Five Years"}
+
+	for option := range options {
+		if option == selected {
+			s.printTextCentered(options[option], s.Height/2-(4-option), (24-len(options[option]))/2, tb.ColorRed, tb.ColorWhite)
+
+		} else {
+			s.printTextCentered(options[option], s.Height/2-(4-option), (24-len(options[option]))/2, tb.ColorWhite, tb.ColorRed)
+		}
+	}
+
+	tb.Flush()
+}
+
+func (s *Screen) chartMenuHandler(symbol string) {
+	selected := 0
+	s.displayChartMenu(symbol, selected)
+	for {
+		switch ev := tb.PollEvent(); ev.Type {
+		case tb.EventKey:
+			if ev.Key == tb.KeyArrowUp && selected > 0 {
+				selected--
+				s.displayChartMenu(symbol, selected)
+			}
+			if ev.Key == tb.KeyArrowDown && selected < 7 {
+				selected++
+				s.displayChartMenu(symbol, selected)
+			}
+			if ev.Key == tb.KeyEsc {
+				return
+			}
+		case tb.EventResize:
+			s.displayChartMenu(symbol, selected)
+		}
+	}
+
+}
+
+func (tick *Ticker) addStock(s *Screen) bool {
 	s.displayAddMenu()
 
-	symb, complete := takeInput()
+	symb, complete := s.takeInput(tick)
 
 	if !complete {
-		return
+		return false
 	}
-	logString("Before")
-	logString(fmt.Sprintln(tick.STOCKS))
 
 	tick.STOCKS = append(tick.STOCKS, symb)
 	sort.Strings(tick.STOCKS)
 
-	logString("After")
-	logString(fmt.Sprintln(tick.STOCKS))
+	return true
+
 }

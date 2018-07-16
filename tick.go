@@ -56,6 +56,17 @@ func isNYSEOpen() bool {
 	}
 }
 
+func (tick *Ticker) verifySecurityExists(symbol string) bool {
+
+	request, err := grequests.Get(fmt.Sprintf("https://api.iextrading.com/1.0/stock/%s/quote", symbol), nil)
+	check(err)
+
+	if request.String() == "Unknown symbol" {
+		return false
+	}
+	return true
+}
+
 func (tick *Ticker) apiLookup() {
 
 	tick.API_RETURN = make([]string, 0)
@@ -140,7 +151,6 @@ func tickerHandler() {
 	refresh := make(chan bool)
 	go func() {
 		for {
-			logString("Refreshing the data")
 			tick.apiLookup()
 			refresh <- tick.parseBatch()
 			time.Sleep(3 * time.Second)
@@ -175,10 +185,16 @@ HANDLE:
 					s.setTicker(tick)
 				}
 				if ev.Key == tb.KeyCtrlA {
-					tick.addStock(s)
+					if !tick.addStock(s) {
+						s.setTicker(tick)
+						continue
+					}
 					tick.apiLookup()
 					tick.parseBatch()
 					s.setTicker(tick)
+				}
+				if ev.Key == tb.KeyEnter {
+					s.chartMenuHandler(tick.STOCKS[s.Selected])
 				}
 
 			case tb.EventResize:
