@@ -1,7 +1,7 @@
 package main
 
 import (
-	tm "github.com/nsf/termbox-go"
+	tb "github.com/nsf/termbox-go"
 	"os"
 )
 
@@ -12,8 +12,8 @@ func main() {
 	file.Close()
 
 	//Initialize the UI
-	tm.Init()
-	defer tm.Close()
+	tb.Init()
+	defer tb.Close()
 
 	tickerHandler()
 

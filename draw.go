@@ -5,13 +5,19 @@ import (
 	tb "github.com/nsf/termbox-go"
 	"reflect"
 	"sort"
+	"strconv"
 	"strings"
+	"time"
 )
 
 type Screen struct {
-	Fields                  []string
-	Colours                 []tb.Attribute
-	Width, Height, Selected int
+	ColourFields  []ColourField
+	Width, Height int
+}
+
+type ColourField struct {
+	Field                  string
+	Foreground, Background tb.Attribute
 }
 
 func (s *Screen) refreshSize() {
@@ -27,14 +33,14 @@ func (s *Screen) drawHelp(helpMsg string) {
 
 }
 
-func (s *Screen) drawTicker() {
+func (s *Screen) drawTicker(tick *Ticker) {
 	s.refreshSize()
 
 	//set the header
 	title := "Tick"
 	char := 0
 	for i := 0; i < s.Width; i++ {
-		//check if we should be printing the title letters
+		//center and print the title letters
 		if i > (s.Width-len(title))/2 && char < len(title) {
 			tb.SetCell(i, 0, rune(title[char]), tb.ColorWhite, 0)
 			char++
@@ -43,52 +49,40 @@ func (s *Screen) drawTicker() {
 		}
 	}
 	for i := 0; i < s.Width; i++ {
-		if i < len(s.Fields[0]) {
-			tb.SetCell(i, 1, rune(s.Fields[0][i]), tb.ColorBlack, tb.ColorCyan)
+		if i < len(s.ColourFields[0].Field) {
+			tb.SetCell(i, 1, rune(s.ColourFields[0].Field[i]), tb.ColorBlack, tb.ColorCyan)
 		} else {
 			tb.SetCell(i, 1, rune(0), 0, tb.ColorCyan)
 		}
 	}
 	//remove the header
-	s.Fields = s.Fields[1:]
+	s.ColourFields = s.ColourFields[1:]
 
-	//calculate which fields should be displayed TODO fix this
-	first := 0
-	last := len(s.Fields)
-	/*
-		if s.Selected < s.Height-3 {
-			first = 0
-			last = len(s.Fields)
-		} else {
-			first = s.Selected - ((s.Height - 3) / 2)
+	//calculate which fields should be displayed
+	var first, last int
 
-			//check if the end of the array is still off the bottom of the screen
-			if s.Selected+((s.Height-3)/2) < len(s.Fields) {
-				last = s.Selected + ((s.Height - 3) / 2)
-			} else {
-				last = len(s.Fields)
-			}
-		}*/
+	if tick.Selected-(s.Height/2)-1 > 0 {
+		first = tick.Selected - (s.Height / 2) - 1
+	} else {
+		first = 0
+	}
 
-	//do the rest of the fields
-	for row := range s.Fields[first:last] {
-		if row == s.Selected {
-			for i := range s.Fields[row] {
-				if s.Colours[row] != tb.ColorWhite {
-					tb.SetCell(i, row+2, rune(s.Fields[row][i]), s.Colours[row], tb.ColorWhite)
-				} else {
-					tb.SetCell(i, row+2, rune(s.Fields[row][i]), tb.ColorBlack, tb.ColorWhite)
-				}
-			}
-		} else {
-			for i := range s.Fields[row] {
-				tb.SetCell(i, row+2, rune(s.Fields[row][i]), s.Colours[row], 0)
-			}
+	if s.Height-3+first < len(s.ColourFields) {
+		last = s.Height - 3 + first
+	} else {
+		last = len(s.ColourFields)
+	}
+
+	s.ColourFields = s.ColourFields[first:last]
+
+	for row := range s.ColourFields {
+		for i := range s.ColourFields[row].Field {
+			tb.SetCell(i, row+2, rune(s.ColourFields[row].Field[i]), s.ColourFields[row].Foreground, s.ColourFields[row].Background)
 		}
 	}
 
-	//clear the rest of the screenhttp://reddit.com/http://reddit.com/http://reddit.com/
-	for row := last + 1; row < s.Height; row++ {
+	//clear the rest of the screen
+	for row := len(s.ColourFields) + 1; row < s.Height; row++ {
 		for col := 0; col < s.Width; col++ {
 			tb.SetCell(col, row, 0, 0, 0)
 		}
@@ -98,19 +92,28 @@ func (s *Screen) drawTicker() {
 
 	s.drawHelp(helpMsg)
 
+	//only for debugging
+	sel := strconv.Itoa(tick.Selected)
+	if tick.Selected > 9 {
+		tb.SetCell(101, 0, rune(sel[1]), tb.ColorWhite, 0)
+		tb.SetCell(100, 0, rune(sel[0]), tb.ColorWhite, 0)
+	} else {
+		tb.SetCell(101, 0, rune(sel[0]), tb.ColorWhite, 0)
+	}
+
 	tb.Flush()
 
 }
 
 func (s *Screen) setTicker(tick *Ticker) {
-	s.Fields = make([]string, 0)
+	s.ColourFields = make([]ColourField, 0)
 
-	s.Fields = append(s.Fields, "SYMBOL      PRICE       VOLUME(m)   OPEN        CLOSE       HIGH        LOW         CHANGE      MARKETCAP   52WKHIGH    52WKLOW     YTDCHANGE")
+	s.ColourFields = append(s.ColourFields, ColourField{"SYMBOL      PRICE       VOLUME(m)   OPEN        CLOSE       HIGH        LOW         CHANGE      MARKETCAP   52WKHIGH    52WKLOW     YTDCHANGE", 0, 0})
 
-	for k := range tick.FIGURES_LIST {
+	for k := range tick.Figures_List {
 
 		//calculate the spaces and format the field
-		v := reflect.ValueOf(&tick.FIGURES_LIST[k]).Elem()
+		v := reflect.ValueOf(&tick.Figures_List[k]).Elem()
 		var field string
 
 		for i := 0; i < v.NumField(); i++ {
@@ -128,12 +131,20 @@ func (s *Screen) setTicker(tick *Ticker) {
 		}
 
 		//add it to the list
-		s.Fields = append(s.Fields, field)
-		s.Colours = append(s.Colours, tick.FIGURES_LIST[k].Colour) //this is stupid
-
+		if k == tick.Selected {
+			if tick.Figures_List[k].Colour != tb.ColorWhite {
+				newCF := ColourField{field, tick.Figures_List[k].Colour, tb.ColorWhite}
+				s.ColourFields = append(s.ColourFields, newCF)
+			} else {
+				newCF := ColourField{field, tb.ColorBlack, tb.ColorWhite}
+				s.ColourFields = append(s.ColourFields, newCF)
+			}
+		} else {
+			newCF := ColourField{field, tick.Figures_List[k].Colour, 0}
+			s.ColourFields = append(s.ColourFields, newCF)
+		}
 	}
-
-	s.drawTicker()
+	s.drawTicker(tick)
 }
 
 func (s *Screen) displayAddMenu() {
@@ -151,10 +162,8 @@ func (s *Screen) displayAddMenu() {
 	tb.Flush()
 }
 
-func (s *Screen) displaySymbolNotFound() {
+func (s *Screen) displayAddingMessage(text string) {
 	s.refreshSize()
-
-	text := "SYMBOL NOT FOUND"
 
 	for i := 0; i < len(text); i++ {
 		tb.SetCell((s.Width-len(text))/2+i, s.Height/2+1, rune(text[i]), tb.ColorBlack, tb.ColorWhite)
@@ -173,10 +182,12 @@ func (s *Screen) takeInput(tick *Ticker) (string, bool) {
 				return symbol, false
 			}
 			if ev.Key == tb.KeyEnter {
+				s.displayAddingMessage("CHECKING...")
 				if tick.verifySecurityExists(symbol) {
+					logString("Returning true from takeInput")
 					return strings.ToUpper(symbol), true
 				} else {
-					s.displaySymbolNotFound()
+					s.displayAddingMessage("SYMBOL NOT FOUND")
 				}
 
 			}
@@ -201,17 +212,17 @@ func (s *Screen) takeInput(tick *Ticker) (string, bool) {
 func (s *Screen) printTextCentered(text string, height, padding int, fg, bg tb.Attribute) {
 	//print the padding
 	for i := 0; i < padding; i++ {
-			tb.SetCell((s.Width+len(text))/2+i, height, 0, 0, bg)
-		}
-	//dont even ask
-	if len(text) % 2 == 1 {
+		tb.SetCell((s.Width+len(text))/2+i, height, 0, 0, bg)
+	}
+	//rough attempt to fix an alignment issue, TODO fix this
+	if len(text)%2 == 1 {
 		padding++
 	}
-	
+
 	for i := 0; i < padding; i++ {
 		tb.SetCell((s.Width-len(text))/2-i, height, 0, 0, bg)
 	}
-	
+
 	//print the text
 	for i := 0; i < len(text); i++ {
 		tb.SetCell((s.Width-len(text))/2+i, height, rune(text[i]), fg, bg)
@@ -265,6 +276,17 @@ func (s *Screen) chartMenuHandler(symbol string) {
 
 }
 
+func (s *Screen) showRefresh() {
+	tb.SetCell(s.Width-1, 0, rune('e'), 0, tb.ColorWhite)
+	tb.Flush()
+
+	go func() {
+		time.Sleep(500 * time.Millisecond)
+		tb.SetCell(s.Width-1, 0, rune(0), 0, 0)
+		tb.Flush()
+	}()
+}
+
 func (tick *Ticker) addStock(s *Screen) bool {
 	s.displayAddMenu()
 
@@ -273,9 +295,10 @@ func (tick *Ticker) addStock(s *Screen) bool {
 	if !complete {
 		return false
 	}
+	logString("Adding stock")
 
-	tick.STOCKS = append(tick.STOCKS, symb)
-	sort.Strings(tick.STOCKS)
+	tick.Stocks = append(tick.Stocks, symb)
+	sort.Strings(tick.Stocks)
 
 	return true
 
