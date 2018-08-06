@@ -253,24 +253,29 @@ func (s *Screen) displayChartMenu(symbol string, selected int) {
 }
 
 func (s *Screen) chartMenuHandler(symbol string) {
-	selected := 0
-	s.displayChartMenu(symbol, selected)
+	selectedInterval := 0
+	s.displayChartMenu(symbol, selectedInterval)
 	for {
 		switch ev := tb.PollEvent(); ev.Type {
 		case tb.EventKey:
-			if ev.Key == tb.KeyArrowUp && selected > 0 {
-				selected--
-				s.displayChartMenu(symbol, selected)
+			if ev.Key == tb.KeyArrowUp && selectedInterval > 0 {
+				selectedInterval--
+				s.displayChartMenu(symbol, selectedInterval	)
 			}
-			if ev.Key == tb.KeyArrowDown && selected < 7 {
-				selected++
-				s.displayChartMenu(symbol, selected)
+			if ev.Key == tb.KeyArrowDown && selectedInterval < 7 {
+				selectedInterval++
+				s.displayChartMenu(symbol, selectedInterval)
 			}
 			if ev.Key == tb.KeyEsc {
 				return
 			}
+			if ev.Key == tb.KeyEnter{
+				//show the chart
+				s.chartHandler(symbol, selectedInterval)
+				return
+			}
 		case tb.EventResize:
-			s.displayChartMenu(symbol, selected)
+			s.displayChartMenu(symbol, selectedInterval)
 		}
 	}
 

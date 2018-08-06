@@ -9,6 +9,7 @@ import (
 	"math"
 	"os"
 	"time"
+	"reflect"
 )
 
 type stockFigures struct {
@@ -51,6 +52,7 @@ func isNYSEOpen() bool {
 
 	request, err := grequests.Get("https://api.iextrading.com/1.0/market", nil)
 	check(err)
+	logString(reflect.TypeOf(request))
 
 	var result []map[string]interface{}
 	json.Unmarshal([]byte(request.String()), &result)
