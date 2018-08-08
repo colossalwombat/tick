@@ -57,7 +57,15 @@ func isNYSEOpen() bool {
 	var result []map[string]interface{}
 	json.Unmarshal([]byte(request.String()), &result)
 
-	lastTime := int64(result[12]["lastUpdated"].(float64) / 1000)
+	var lastTime int64
+	
+	for i := range(result){
+		if result[i]["venue"] == "NYSE"{
+			lastTime = int64(result[i]["lastUpdated"].(float64) / 1000)		
+		}	
+	}
+
+	
 	currentTime := time.Now().Unix()
 
 	if math.Abs(float64(currentTime-lastTime)) > 10.0 {
