@@ -64,9 +64,15 @@ func (c *Chart)getData(){
 	check(err)
 	var api_return []map[string]interface{}
 	json.Unmarshal([]byte(request.String()), &api_return)
+	logString(api_return)
 
 	for k := range api_return{
-		c.Datapoints = append(c.Datapoints, api_return[k]["close"].(float64))
+		switch api_return[k]["close"].(type){
+			case float64:
+				c.Datapoints = append(c.Datapoints, api_return[k]["close"].(float64))
+			case nil:
+				c.Datapoints = append(c.Datapoints, api_return[k]["average"].(float64))
+		}
 	}
 }
 
@@ -88,14 +94,51 @@ func (c *Chart) drawChart(s *Screen){
 	graphHeight := s.Height - 3
 	maxDataPoint, minDataPoint := getMax(c.Datapoints), getMin(c.Datapoints)
 
+	//two cases: either there are more datapoints than we can display, and we have to average OR there are less and we need to extrapolate
+	if len(c.Datapoints) > s.Width{
+		compressedDataPoints := []float64{}
+
+		for i := 0; i < s.Width; i++ {
+			var average float64
+			for j := 0; j < len(c.Datapoints) / s.Width; j++ {
+				average += c.Datapoints[i+j]
+			}
+			average /= float64(len(c.Datapoints) / s.Width)
+
+			compressedDataPoints = append(compressedDataPoints, average)
+		}
+		c.Datapoints = compressedDataPoints
+	} else {
+		//ie there are less points
+
+		extrapolatedDataPoints := []float64{}
+
+		//simple linear extrapolation algorithm
+		for i := 0; i < s.Width; i++ {
+			j := int(math.Floor(float64(i) * (float64(len(c.Datapoints)) / float64(s.Width))))
+
+			slope := (c.Datapoints[j+1] - c.Datapoints[j]) / float64((j+1)*(s.Width/len(c.Datapoints)) - j*(s.Width/len(c.Datapoints)))
+
+			extrapolatedDataPoints = append(extrapolatedDataPoints, (float64(i - j*(s.Width/len(c.Datapoints))) * slope))
+		}
+		c.Datapoints = extrapolatedDataPoints
+	}
+
+
+	//draw the actual graph
+	jogGraph := 2*minDataPoint / 3
+
 	for k := 0; k < len(c.Datapoints); k++{
 		for j := 0; j < graphHeight; j++ {
-			if j <= int((c.Datapoints[k] - minDataPoint) / (maxDataPoint - minDataPoint) * float64(graphHeight)) {
+			if j <= int((c.Datapoints[k] - jogGraph) / (maxDataPoint - jogGraph) * float64(graphHeight)) {
 				tb.SetCell(k, s.Height - 3 - j, bullet, tb.ColorCyan,0)
 			}
 		}
 
 	}
+
+	//draw the labels
+
 
 	tb.Flush()
 
