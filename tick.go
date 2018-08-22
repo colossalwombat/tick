@@ -8,8 +8,9 @@ import (
 	tb "github.com/nsf/termbox-go"
 	"math"
 	"os"
+	"sort"
+	"sync"
 	"time"
-	"reflect"
 )
 
 type stockFigures struct {
@@ -28,6 +29,7 @@ type Ticker struct {
 	Api_Return   []string
 	Figures_List []stockFigures
 	Selected     int
+	RefreshNo    int64
 }
 
 func check(e error) {
@@ -36,13 +38,17 @@ func check(e error) {
 	}
 }
 
+func (tick *Ticker) updateRefreshNo() {
+	tick.RefreshNo = (tick.RefreshNo + 1) % math.MaxInt64
+}
+
 func logString(args ...interface{}) {
 	file, err := os.OpenFile("log.txt", os.O_APPEND|os.O_WRONLY, 0644)
 	defer file.Close()
 	check(err)
 
 	str := spew.Sdump(args)
-	str += string('\n')
+	str += string('\n') + time.Now().String()
 
 	_, err = file.WriteString(str)
 
@@ -52,20 +58,18 @@ func isNYSEOpen() bool {
 
 	request, err := grequests.Get("https://api.iextrading.com/1.0/market", nil)
 	check(err)
-	logString(reflect.TypeOf(request))
 
 	var result []map[string]interface{}
 	json.Unmarshal([]byte(request.String()), &result)
 
 	var lastTime int64
-	
-	for i := range(result){
-		if result[i]["venue"] == "NYSE"{
-			lastTime = int64(result[i]["lastUpdated"].(float64) / 1000)		
-		}	
+
+	for i := range result {
+		if result[i]["venue"] == "NYSE" {
+			lastTime = int64(result[i]["lastUpdated"].(float64) / 1000)
+		}
 	}
 
-	
 	currentTime := time.Now().Unix()
 
 	if math.Abs(float64(currentTime-lastTime)) > 10.0 {
@@ -84,6 +88,13 @@ func duplicateTicker(tick Ticker) *Ticker {
 	return &newTick
 }
 
+func (tick *Ticker) deleteStock() {
+	i := tick.Selected
+	tick.Stocks = append(tick.Stocks[:i], tick.Stocks[i+1:]...)
+	tick.Figures_List = append(tick.Figures_List[:i], tick.Figures_List[i+1:]...)
+	tick.Api_Return = append(tick.Api_Return[:i], tick.Api_Return[i+1:]...)
+}
+
 func (tick *Ticker) verifySecurityExists(symbol string) bool {
 
 	request, err := grequests.Get(fmt.Sprintf("https://api.iextrading.com/1.0/stock/%s/quote", symbol), nil)
@@ -98,6 +109,7 @@ func (tick *Ticker) verifySecurityExists(symbol string) bool {
 func (tick *Ticker) apiLookup() {
 
 	tick.Api_Return = make([]string, 0)
+	stocksCopy := make([]string, 0)
 
 	for k := range tick.Stocks {
 		request, err := grequests.Get(fmt.Sprintf("https://api.iextrading.com/1.0/stock/%s/quote", tick.Stocks[k]), nil)
@@ -107,10 +119,16 @@ func (tick *Ticker) apiLookup() {
 		//TODO make this more efficient, stop crashing when the API lookup fails
 		if request.String() == "Unknown symbol" {
 			continue
+		} else {
+			stocksCopy = append(stocksCopy, tick.Stocks[k])
 		}
+
+		logString(request.String())
 
 		tick.Api_Return = append(tick.Api_Return, request.String())
 	}
+
+	tick.Stocks = stocksCopy
 
 }
 
@@ -169,6 +187,8 @@ func tickerHandler() {
 		Stocks:      []string{"ABT", "ABBV", "ACN", "ADBE", "ADT", "AAP", "AES", "AET", "AFL", "AMG", "A", "APD", "AKAM", "AA", "AGN", "ALXN", "ALLE", "ADS", "ALL", "ALTR", "MO", "AMZN", "AEE", "AAL", "AEP", "AXP", "AIG", "AMT", "AMP", "ABC", "AME", "AMGN", "APH", "APC", "ADI", "AON", "APA", "AIV", "AMAT", "ADM", "AIZ", "T", "ADSK", "ADP", "AN", "AZO", "AVGO", "AVB", "AVY", "BHI", "BLL", "BAC", "BK", "BCR", "BXLT", "BAX", "BBT", "BDX", "BBBY", "BRK-B", "BBY", "BLX", "HRB", "BA", "BWA", "BXP", "BSK", "BMY", "BRCM", "BF-B", "CHRW", "CA", "CVC", "COG", "CAM", "CPB", "COF", "CAH", "HSIC", "KMX", "CCL", "CAT", "CBG", "CBS", "CELG", "CNP", "CTL", "CERN", "CF", "SCHW", "CHK", "CVX", "CMG", "CB"},
 		Market_Open: isNYSEOpen(),
 	}
+	//sort the list
+	sort.Strings(tick.Stocks)
 	//setup the ticker (Initial API call)
 	tick.apiLookup()
 	tick.parseBatch()
@@ -179,6 +199,7 @@ func tickerHandler() {
 
 	//established the thread for the listener
 	event_queue := make(chan tb.Event)
+	var tickWG sync.WaitGroup
 	go func() {
 		for {
 			event_queue <- tb.PollEvent()
@@ -190,13 +211,21 @@ func tickerHandler() {
 	//screen/data refresh loop, mostly under control now
 	go func() {
 		for {
+			startingNo := tick.RefreshNo
 			time.Sleep(3 * time.Second)
+			tickWG.Wait()
+
 			newTick := duplicateTicker(*tick)
+
 			newTick.apiLookup()
 			newTick.parseBatch()
 
 			s.showRefresh()
-			refresh <- newTick
+
+			if startingNo == tick.RefreshNo {
+				refresh <- newTick
+				tick = newTick
+			}
 		}
 	}()
 
@@ -207,6 +236,8 @@ HANDLE:
 		case ev := <-event_queue:
 			switch ev.Type {
 			case tb.EventKey:
+				tickWG.Add(1)
+				tick.updateRefreshNo()
 				if ev.Key == tb.KeyCtrlQ {
 					break HANDLE
 				}
@@ -244,6 +275,11 @@ HANDLE:
 					s.chartMenuHandler(tick.Stocks[tick.Selected])
 				}
 
+				if ev.Key == tb.KeyCtrlD {
+					tick.deleteStock()
+					s.setTicker(tick)
+				}
+				tickWG.Done()
 			case tb.EventResize:
 				s.setTicker(tick)
 

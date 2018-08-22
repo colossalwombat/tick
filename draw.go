@@ -5,7 +5,6 @@ import (
 	tb "github.com/nsf/termbox-go"
 	"reflect"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -88,18 +87,9 @@ func (s *Screen) drawTicker(tick *Ticker) {
 		}
 	}
 
-	helpMsg := "Close [Ctrl-Q]	Change Selection [Up/Down]	Refresh (temporary) [Space] Add Stock [Crtl-A]"
+	helpMsg := "Close [Ctrl-Q]	Change Selection [Up/Down] Add Stock [Crtl-A]	Delete Stock [Crtl-D]"
 
 	s.drawHelp(helpMsg)
-
-	//only for debugging
-	sel := strconv.Itoa(tick.Selected)
-	if tick.Selected > 9 {
-		tb.SetCell(101, 0, rune(sel[1]), tb.ColorWhite, 0)
-		tb.SetCell(100, 0, rune(sel[0]), tb.ColorWhite, 0)
-	} else {
-		tb.SetCell(101, 0, rune(sel[0]), tb.ColorWhite, 0)
-	}
 
 	tb.Flush()
 
@@ -147,31 +137,6 @@ func (s *Screen) setTicker(tick *Ticker) {
 	s.drawTicker(tick)
 }
 
-func (s *Screen) displayAddMenu() {
-	s.refreshSize()
-	tb.Clear(0, 0)
-
-	menuText := "Enter the name (symbol) of the stock to add:"
-
-	for i := 0; i < len(menuText); i++ {
-		tb.SetCell((s.Width-len(menuText))/2+i, s.Height/2-1, rune(menuText[i]), tb.ColorBlack, tb.ColorWhite)
-	}
-
-	s.drawHelp("Cancel [ESC]")
-
-	tb.Flush()
-}
-
-func (s *Screen) displayAddingMessage(text string) {
-	s.refreshSize()
-
-	for i := 0; i < len(text); i++ {
-		tb.SetCell((s.Width-len(text))/2+i, s.Height/2+1, rune(text[i]), tb.ColorBlack, tb.ColorWhite)
-	}
-	tb.Flush()
-
-}
-
 func (s *Screen) takeInput(tick *Ticker) (string, bool) {
 	symbol := ""
 	for {
@@ -184,7 +149,6 @@ func (s *Screen) takeInput(tick *Ticker) (string, bool) {
 			if ev.Key == tb.KeyEnter {
 				s.displayAddingMessage("CHECKING...")
 				if tick.verifySecurityExists(symbol) {
-					logString("Returning true from takeInput")
 					return strings.ToUpper(symbol), true
 				} else {
 					s.displayAddingMessage("SYMBOL NOT FOUND")
@@ -260,7 +224,7 @@ func (s *Screen) chartMenuHandler(symbol string) {
 		case tb.EventKey:
 			if ev.Key == tb.KeyArrowUp && selectedInterval > 0 {
 				selectedInterval--
-				s.displayChartMenu(symbol, selectedInterval	)
+				s.displayChartMenu(symbol, selectedInterval)
 			}
 			if ev.Key == tb.KeyArrowDown && selectedInterval < 7 {
 				selectedInterval++
@@ -269,7 +233,7 @@ func (s *Screen) chartMenuHandler(symbol string) {
 			if ev.Key == tb.KeyEsc {
 				return
 			}
-			if ev.Key == tb.KeyEnter{
+			if ev.Key == tb.KeyEnter {
 				//show the chart
 				s.chartHandler(symbol, selectedInterval)
 				return
@@ -292,6 +256,8 @@ func (s *Screen) showRefresh() {
 	}()
 }
 
+//functions for handling the addition of stocks to the list
+
 func (tick *Ticker) addStock(s *Screen) bool {
 	s.displayAddMenu()
 
@@ -300,11 +266,35 @@ func (tick *Ticker) addStock(s *Screen) bool {
 	if !complete {
 		return false
 	}
-	logString("Adding stock")
 
 	tick.Stocks = append(tick.Stocks, symb)
 	sort.Strings(tick.Stocks)
 
 	return true
+
+}
+
+func (s *Screen) displayAddMenu() {
+	s.refreshSize()
+	tb.Clear(0, 0)
+
+	menuText := "Enter the name (symbol) of the stock to add:"
+
+	for i := 0; i < len(menuText); i++ {
+		tb.SetCell((s.Width-len(menuText))/2+i, s.Height/2-1, rune(menuText[i]), tb.ColorBlack, tb.ColorWhite)
+	}
+
+	s.drawHelp("Cancel [ESC]")
+
+	tb.Flush()
+}
+
+func (s *Screen) displayAddingMessage(text string) {
+	s.refreshSize()
+
+	for i := 0; i < len(text); i++ {
+		tb.SetCell((s.Width-len(text))/2+i, s.Height/2+1, rune(text[i]), tb.ColorBlack, tb.ColorWhite)
+	}
+	tb.Flush()
 
 }
